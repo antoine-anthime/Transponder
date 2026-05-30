@@ -16,6 +16,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "nuxt": "^4.4.6",
+    "openai": "^6.39.1",
     "reka-ui": "^2.9.8",
     "rss-parser": "^3.13.0",
     "shadcn-nuxt": "^2.7.3",

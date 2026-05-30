@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ExternalLink, Share2 } from '@lucide/vue'
+import { ExternalLink, Share2, Sparkles } from '@lucide/vue'
 import type { Article } from '~/types'
 
 const props = defineProps<{ article: Article }>()
+const emit = defineEmits<{ summarize: [article: Article] }>()
 
 function formatDate(dateStr: string) {
   if (!dateStr) return ''
@@ -45,6 +46,9 @@ async function shareArticle() {
         {{ formatDate(article.pubDate) }}
       </span>
       <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <Button variant="ghost" size="icon" class="size-7" title="Résumer avec l'IA" @click="emit('summarize', article)">
+          <Sparkles class="size-3.5" />
+        </Button>
         <Button variant="ghost" size="icon" class="size-7" as-child>
           <a :href="article.link" target="_blank" rel="noopener noreferrer" title="Ouvrir">
             <ExternalLink class="size-3.5" />

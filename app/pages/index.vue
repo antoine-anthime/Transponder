@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Star, Menu, ChevronLeft } from '@lucide/vue'
+import { Star, Menu, ChevronLeft, Sparkles } from '@lucide/vue'
 import type { Category, Feed, Article } from '~/types'
 
 const supabase = useSupabaseClient()
@@ -62,6 +62,41 @@ async function selectFeed(feed: Feed) {
 function openDrawer() {
   mobileView.value = selectedCategory.value ? 'feeds' : 'categories'
   drawerOpen.value = true
+}
+
+// ── Résumé IA ───────────────────────────────────────────
+const summaryOpen = ref(false)
+const summaryArticle = ref<Article | null>(null)
+const summaryText = ref('')
+const summaryLoading = ref(false)
+const summaryError = ref('')
+const summaryCached = ref(false)
+
+async function openSummary(article: Article) {
+  summaryArticle.value = article
+  summaryText.value = ''
+  summaryError.value = ''
+  summaryCached.value = false
+  summaryLoading.value = true
+  summaryOpen.value = true
+
+  try {
+    const res = await $fetch<{ summary: string, cached: boolean }>('/api/summarize', {
+      method: 'POST',
+      body: {
+        title: article.title,
+        contentSnippet: article.contentSnippet,
+        articleUrl: article.link,
+      },
+    })
+    summaryText.value = res.summary
+    summaryCached.value = res.cached
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : ''
+    summaryError.value = msg || 'Impossible de générer un résumé. Vérifie qu\'Ollama tourne bien.'
+  } finally {
+    summaryLoading.value = false
+  }
 }
 
 async function signOut() {
@@ -209,6 +244,7 @@ async function signOut() {
             v-for="article in articles"
             :key="article.link"
             :article="article"
+            @summarize="openSummary"
           />
         </div>
 
@@ -278,4 +314,68 @@ async function signOut() {
     </Sheet>
 
   </div>
+
+  <!-- ─── Sheet résumé IA ──────────────────────────────────── -->
+  <Sheet v-model:open="summaryOpen">
+    <SheetContent side="right" class="w-full sm:max-w-md flex flex-col gap-0 p-0">
+
+      <div class="px-5 py-4 border-b shrink-0">
+        <div class="flex items-center gap-2 mb-1">
+          <Sparkles class="size-4 text-primary" />
+          <SheetTitle class="text-sm font-semibold">Résumé IA</SheetTitle>
+          <Badge v-if="summaryCached" variant="secondary" class="text-xs ml-auto">Mis en cache</Badge>
+        </div>
+        <p class="text-xs text-muted-foreground line-clamp-2">{{ summaryArticle?.title }}</p>
+      </div>
+
+      <div class="flex-1 overflow-y-auto px-5 py-5">
+
+        <!-- Loading -->
+        <div v-if="summaryLoading" class="space-y-3">
+          <div class="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+            <div class="size-3 rounded-full bg-primary animate-pulse" />
+            Génération en cours…
+          </div>
+          <Skeleton class="h-4 w-full" />
+          <Skeleton class="h-4 w-5/6" />
+          <Skeleton class="h-4 w-4/5" />
+          <Skeleton class="h-4 w-full mt-4" />
+        </div>
+
+        <!-- Erreur -->
+        <div v-else-if="summaryError" class="text-sm text-destructive space-y-3">
+          <p>{{ summaryError }}</p>
+          <Button variant="outline" size="sm" @click="openSummary(summaryArticle!)">
+            Réessayer
+          </Button>
+        </div>
+
+        <!-- Résumé formaté -->
+        <div v-else-if="summaryText" class="space-y-3 text-sm leading-relaxed">
+          <template v-for="(line, i) in summaryText.split('\n').filter(l => l.trim())" :key="i">
+            <!-- Bullet points -->
+            <div v-if="line.startsWith('•')" class="flex gap-2">
+              <span class="text-primary font-bold shrink-0 mt-0.5">•</span>
+              <span>{{ line.slice(1).trim() }}</span>
+            </div>
+            <!-- Conclusion 💡 -->
+            <div v-else-if="line.startsWith('💡')" class="mt-4 rounded-md bg-muted px-3 py-2.5 text-muted-foreground text-xs">
+              {{ line }}
+            </div>
+          </template>
+        </div>
+
+      </div>
+
+      <div class="px-5 py-3 border-t shrink-0">
+        <Button variant="outline" size="sm" class="w-full" as-child>
+          <a :href="summaryArticle?.link" target="_blank" rel="noopener noreferrer">
+            Lire l'article complet
+          </a>
+        </Button>
+      </div>
+
+    </SheetContent>
+  </Sheet>
+
 </template>

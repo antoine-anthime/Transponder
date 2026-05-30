@@ -4,6 +4,13 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
+
+  runtimeConfig: {
+    // Serveur uniquement (jamais exposé au client)
+    openaiBaseUrl: 'http://localhost:11434/v1', // override via NUXT_OPENAI_BASE_URL
+    openaiApiKey: 'ollama',                     // override via NUXT_OPENAI_API_KEY
+    aiModel: 'llama3.2:3b',                     // override via NUXT_AI_MODEL
+  },
   css: ['~/assets/css/tailwind.css'],
 
   vite: {
