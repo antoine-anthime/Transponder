@@ -12,7 +12,16 @@ export default defineNuxtConfig({
     ],
   },
 
-  modules: ['shadcn-nuxt'],
+  modules: ['@nuxtjs/supabase', 'shadcn-nuxt'],
+
+  supabase: {
+    redirect: true,
+    redirectOptions: {
+      login: '/login',
+      callback: '/auth/confirm',
+      exclude: ['/login'],
+    },
+  },
   shadcn: {
     /**
      * Prefix for all the imported component.
