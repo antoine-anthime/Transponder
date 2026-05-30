@@ -1,0 +1,31 @@
+# Build outputs
+.output
+.nuxt
+.nitro
+.cache
+dist
+
+# Dependencies (reinstalled in Docker)
+node_modules
+
+# Environment (injected at runtime)
+.env
+.env.*
+
+# Dev / docs
+*.md
+Roadmap.md
+ARCHITECTURE.md
+
+# DB / data files
+supabase/
+feeds-recovered.csv
+db_cluster-*.backup.gz
+
+# OS
+.DS_Store
+
+# IDE
+.fleet
+.idea
+.vscode
