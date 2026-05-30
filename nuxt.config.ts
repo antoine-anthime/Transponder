@@ -5,6 +5,17 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
 
+  app: {
+    head: {
+      htmlAttrs: { lang: 'fr', class: 'dark' },
+      title: 'Transponder — intercept terminal',
+      meta: [
+        { name: 'description', content: 'Transponder — reader RSS full-stack. Auth Supabase, curation par fréquence, parsing edge-side, briefings IA. Console de veille inspirée du cockpit.' },
+        { name: 'theme-color', content: '#23211c' },
+      ],
+    },
+  },
+
   runtimeConfig: {
     // Serveur uniquement (jamais exposé au client)
     openaiBaseUrl: 'http://localhost:11434/v1', // override via NUXT_OPENAI_BASE_URL

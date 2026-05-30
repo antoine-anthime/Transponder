@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { Star, Menu, ChevronLeft, Sparkles } from '@lucide/vue'
+import {
+  Star, Menu, ChevronLeft, Sparkles, Radar, Radio,
+  Sun, Moon, LogOut, ArrowUpRight, RefreshCw, Signal,
+} from '@lucide/vue'
 import type { Category, Feed, Article } from '~/types'
 
 const supabase = useSupabaseClient()
@@ -7,6 +10,7 @@ const user = useSupabaseUser()
 
 const { categories, fetchCategories } = useCategories()
 const { isBookmarked, fetchBookmarks, toggleBookmark } = useBookmarks()
+const { color: categoryColor, icon: categoryIcon } = useCategoryMeta()
 
 // Reader state
 const selectedCategory = ref<Category | null>(null)
@@ -28,6 +32,12 @@ const otherCategories = computed(() =>
 )
 const userInitials = computed(() =>
   (user.value?.email ?? '').slice(0, 2).toUpperCase(),
+)
+const totalFeeds = computed(() =>
+  categories.value.reduce((acc, c) => acc + (c.feeds?.length ?? 0), 0),
+)
+const selectedAccent = computed(() =>
+  selectedCategory.value ? categoryColor(selectedCategory.value.id) : 'var(--primary)',
 )
 
 onMounted(async () => {
@@ -53,7 +63,7 @@ async function selectFeed(feed: Feed) {
     const data = await $fetch<Article[]>('/api/news', { query: { url: feed.url } })
     articles.value = data
   } catch {
-    articlesError.value = 'Impossible de charger ce flux. Il est peut-être indisponible ou le format n\'est pas supporté.'
+    articlesError.value = 'Aucun signal. Le flux est peut-être indisponible ou son format n\'est pas supporté.'
   } finally {
     articlesLoading.value = false
   }
@@ -64,7 +74,36 @@ function openDrawer() {
   drawerOpen.value = true
 }
 
-// ── Résumé IA ───────────────────────────────────────────
+// ── Thème (jour / nuit cockpit) ─────────────────────────
+const isDark = ref(true)
+function applyTheme() {
+  document.documentElement.classList.toggle('dark', isDark.value)
+}
+function toggleTheme() {
+  isDark.value = !isDark.value
+  applyTheme()
+  localStorage.setItem('transponder-theme', isDark.value ? 'dark' : 'light')
+}
+
+// ── Horloge Zulu (UTC, convention aviation) ─────────────
+const zulu = ref('--:--:--')
+let clockTimer: ReturnType<typeof setInterval> | undefined
+function tickClock() {
+  zulu.value = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'UTC',
+  }).format(new Date())
+}
+
+onMounted(() => {
+  const saved = localStorage.getItem('transponder-theme')
+  isDark.value = saved ? saved === 'dark' : true
+  applyTheme()
+  tickClock()
+  clockTimer = setInterval(tickClock, 1000)
+})
+onUnmounted(() => clearInterval(clockTimer))
+
+// ── Briefing IA ─────────────────────────────────────────
 const summaryOpen = ref(false)
 const summaryArticle = ref<Article | null>(null)
 const summaryText = ref('')
@@ -93,7 +132,7 @@ async function openSummary(article: Article) {
     summaryCached.value = res.cached
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : ''
-    summaryError.value = msg || 'Impossible de générer un résumé. Vérifie qu\'Ollama tourne bien.'
+    summaryError.value = msg || 'Décodage impossible. Vérifie que le moteur IA (Ollama) est en ligne.'
   } finally {
     summaryLoading.value = false
   }
@@ -108,142 +147,255 @@ async function signOut() {
 <template>
   <div class="h-screen flex flex-col overflow-hidden bg-background">
 
-    <!-- ─── Header ──────────────────────────────────────────── -->
-    <header class="h-14 border-b flex items-center px-3 gap-2 shrink-0">
-      <Button variant="ghost" size="icon" class="md:hidden" @click="openDrawer">
+    <!-- ─── Barre cockpit ─────────────────────────────────────── -->
+    <header class="relative h-14 border-b border-border/80 flex items-center px-3 sm:px-4 gap-3 shrink-0 bg-sidebar/60 backdrop-blur-sm">
+      <div class="pointer-events-none absolute inset-x-0 bottom-0 h-px overflow-hidden">
+        <div class="sweep-x h-full w-1/3 bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
+      </div>
+
+      <Button variant="ghost" size="icon" class="md:hidden -ml-1" @click="openDrawer">
         <Menu class="size-4" />
       </Button>
 
-      <span class="font-semibold tracking-tight text-sm flex-1">Orbit News</span>
+      <!-- Wordmark -->
+      <div class="flex items-center gap-2.5">
+        <span class="grid place-items-center size-8 rounded-md border border-primary/40 bg-primary/10 text-primary text-glow">
+          <Radar class="size-4.5" />
+        </span>
+        <div class="leading-none">
+          <span class="font-mono font-semibold tracking-[0.22em] text-[15px] text-foreground">TRANSPONDER</span>
+          <p class="hidden sm:block font-mono text-[9px] uppercase tracking-[0.3em] text-muted-foreground mt-1">
+            RSS · INTERCEPT &amp; DECODE
+          </p>
+        </div>
+      </div>
+
+      <!-- Status block -->
+      <div class="hidden lg:flex items-center gap-4 ml-4 pl-4 border-l border-border/70 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        <span class="flex items-center gap-1.5">
+          <span class="size-1.5 rounded-full bg-signal signal-dot" />
+          <span class="text-signal">ONLINE</span>
+        </span>
+        <span class="flex items-center gap-1.5">
+          <Signal class="size-3 text-primary" />
+          {{ totalFeeds }} STATIONS
+        </span>
+      </div>
+
+      <div class="flex-1" />
+
+      <!-- Zulu clock -->
+      <div class="hidden sm:flex flex-col items-end leading-none font-mono">
+        <span class="text-[13px] font-semibold tabular-nums text-foreground tracking-wider">{{ zulu }}<span class="text-primary">Z</span></span>
+        <span class="text-[8px] uppercase tracking-[0.25em] text-muted-foreground mt-1">UTC · ZULU</span>
+      </div>
+
+      <Button variant="ghost" size="icon" class="size-9 text-muted-foreground hover:text-foreground" :title="isDark ? 'Mode jour' : 'Mode nuit'" @click="toggleTheme">
+        <Sun v-if="isDark" class="size-4" />
+        <Moon v-else class="size-4" />
+      </Button>
 
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
           <Button variant="ghost" class="rounded-full size-9 p-0">
-            <Avatar class="size-8">
-              <AvatarImage :src="user?.user_metadata?.avatar_url" />
-              <AvatarFallback class="text-xs">{{ userInitials }}</AvatarFallback>
+            <Avatar class="size-8 border border-border">
+              <AvatarImage v-if="user?.user_metadata?.avatar_url" :src="user.user_metadata.avatar_url" />
+              <AvatarFallback class="text-[10px] font-mono bg-secondary text-foreground">{{ userInitials }}</AvatarFallback>
             </Avatar>
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" class="w-52">
-          <DropdownMenuLabel class="text-xs font-normal text-muted-foreground truncate">
-            {{ user?.email }}
-          </DropdownMenuLabel>
+        <DropdownMenuContent align="end" class="w-56">
+          <div class="px-2 py-1.5">
+            <p class="font-mono text-[9px] uppercase tracking-widest text-muted-foreground">Opérateur</p>
+            <p class="text-xs truncate mt-0.5">{{ user?.email }}</p>
+          </div>
           <DropdownMenuSeparator />
-          <DropdownMenuItem class="text-destructive cursor-pointer" @click="signOut">
-            Se déconnecter
+          <DropdownMenuItem class="text-destructive cursor-pointer gap-2" @click="signOut">
+            <LogOut class="size-3.5" />
+            Déconnexion
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </header>
 
-    <!-- ─── Body ─────────────────────────────────────────────── -->
+    <!-- ─── Corps ──────────────────────────────────────────────── -->
     <div class="flex-1 flex overflow-hidden">
 
-      <!-- Desktop Col 1 : Catégories -->
-      <aside class="hidden md:flex flex-col w-56 border-r overflow-y-auto shrink-0 py-2">
-        <template v-if="bookmarkedCategories.length">
-          <p class="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            Favoris
+      <!-- Col 1 : Fréquences -->
+      <aside class="hidden md:flex flex-col w-60 border-r border-border/80 bg-sidebar/30 shrink-0">
+        <div class="flex items-center justify-between px-4 pt-4 pb-2">
+          <span class="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">// Fréquences</span>
+          <span class="font-mono text-[10px] tabular-nums text-muted-foreground/60">{{ categories.length }}</span>
+        </div>
+
+        <div class="flex-1 overflow-y-auto pb-3">
+          <template v-if="bookmarkedCategories.length">
+            <p class="flex items-center gap-1.5 px-4 py-1.5 font-mono text-[10px] font-semibold text-primary/80 uppercase tracking-widest">
+              <Star class="size-3 fill-primary text-primary" /> Monitoring
+            </p>
+            <ReaderCategoryRow
+              v-for="cat in bookmarkedCategories"
+              :key="cat.id"
+              :category="cat"
+              :selected="selectedCategory?.id === cat.id"
+              :bookmarked="true"
+              @select="selectCategory(cat)"
+              @toggle-bookmark="toggleBookmark(cat.id)"
+            />
+            <Separator class="my-2.5 opacity-60" />
+          </template>
+
+          <p class="px-4 py-1.5 font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+            Toutes bandes
           </p>
           <ReaderCategoryRow
-            v-for="cat in bookmarkedCategories"
+            v-for="cat in otherCategories"
             :key="cat.id"
             :category="cat"
             :selected="selectedCategory?.id === cat.id"
-            :bookmarked="true"
+            :bookmarked="false"
             @select="selectCategory(cat)"
             @toggle-bookmark="toggleBookmark(cat.id)"
           />
-          <Separator class="my-2" />
-        </template>
-
-        <p class="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          Catégories
-        </p>
-        <ReaderCategoryRow
-          v-for="cat in otherCategories"
-          :key="cat.id"
-          :category="cat"
-          :selected="selectedCategory?.id === cat.id"
-          :bookmarked="false"
-          @select="selectCategory(cat)"
-          @toggle-bookmark="toggleBookmark(cat.id)"
-        />
+        </div>
       </aside>
 
-      <!-- Desktop Col 2 : Sources -->
-      <aside class="hidden md:flex flex-col w-56 border-r overflow-y-auto shrink-0">
+      <!-- Col 2 : Stations -->
+      <aside class="hidden md:flex flex-col w-64 border-r border-border/80 shrink-0 bg-background">
         <template v-if="selectedCategory">
-          <div class="px-3 py-3 border-b shrink-0">
-            <p class="text-sm font-semibold">{{ selectedCategory.name }}</p>
-            <p class="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+          <div class="px-4 py-3.5 border-b border-border/80 shrink-0">
+            <div class="flex items-start gap-2.5">
+              <span
+                class="grid place-items-center size-8 shrink-0 rounded-md border"
+                :style="{ color: selectedAccent, borderColor: selectedAccent, background: `color-mix(in oklab, ${selectedAccent} 12%, transparent)` }"
+              >
+                <component :is="categoryIcon(selectedCategory.slug)" class="size-4" />
+              </span>
+              <div class="min-w-0">
+                <p class="text-sm font-semibold leading-tight">{{ selectedCategory.name }}</p>
+                <p class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-1">
+                  {{ selectedCategory.feeds?.length ?? 0 }} stations
+                </p>
+              </div>
+            </div>
+            <p v-if="selectedCategory.description" class="text-xs text-muted-foreground mt-2.5 leading-relaxed line-clamp-2">
               {{ selectedCategory.description }}
             </p>
           </div>
-          <div
-            v-for="feed in selectedCategory.feeds"
-            :key="feed.id"
-            class="px-3 py-2.5 cursor-pointer hover:bg-accent transition-colors border-b border-border/40"
-            :class="selectedFeed?.id === feed.id ? 'bg-accent' : ''"
-            @click="selectFeed(feed)"
-          >
-            <p class="text-sm truncate" :class="selectedFeed?.id === feed.id ? 'font-medium' : ''">
-              {{ feed.name }}
-            </p>
-            <p class="text-xs text-muted-foreground truncate mt-0.5">{{ feed.description }}</p>
+
+          <div class="flex-1 overflow-y-auto py-1">
+            <button
+              v-for="feed in selectedCategory.feeds"
+              :key="feed.id"
+              class="group w-full text-left px-4 py-2.5 cursor-pointer transition-colors relative"
+              :class="selectedFeed?.id === feed.id ? 'bg-accent/60' : 'hover:bg-accent/30'"
+              @click="selectFeed(feed)"
+            >
+              <span
+                v-if="selectedFeed?.id === feed.id"
+                class="absolute left-0 inset-y-1.5 w-0.5 rounded-r"
+                :style="{ background: selectedAccent }"
+              />
+              <div class="flex items-center gap-2">
+                <span
+                  class="size-1.5 rounded-full shrink-0"
+                  :class="feed.telex ? 'bg-signal signal-dot' : 'bg-muted-foreground/40'"
+                />
+                <span class="text-sm truncate flex-1" :class="selectedFeed?.id === feed.id ? 'font-medium text-foreground' : 'text-foreground/85'">
+                  {{ feed.name }}
+                </span>
+                <span v-if="feed.telex" class="font-mono text-[8px] font-bold uppercase tracking-widest text-signal">LIVE</span>
+              </div>
+              <p v-if="feed.description" class="text-xs text-muted-foreground truncate mt-0.5 pl-3.5">{{ feed.description }}</p>
+            </button>
           </div>
         </template>
-        <div v-else class="flex-1 flex items-center justify-center p-4">
-          <p class="text-xs text-muted-foreground text-center">← Choisis une catégorie</p>
+
+        <div v-else class="flex-1 flex items-center justify-center p-6 bg-grid">
+          <div class="text-center space-y-2">
+            <Radio class="size-6 mx-auto text-muted-foreground/50" />
+            <p class="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70 max-w-[12rem] leading-relaxed">
+              Sélectionne une fréquence pour lister ses stations
+            </p>
+          </div>
         </div>
       </aside>
 
-      <!-- Col 3 : Articles -->
-      <main class="flex-1 overflow-y-auto">
+      <!-- Col 3 : Transmissions -->
+      <main class="flex-1 overflow-y-auto bg-background">
 
-        <!-- État vide / accueil -->
-        <div v-if="!selectedFeed && !articlesLoading" class="h-full flex items-center justify-center p-8">
-          <div class="text-center space-y-3 max-w-xs">
-            <p class="text-5xl">📡</p>
-            <h2 class="text-xl font-semibold tracking-tight">Orbit News</h2>
-            <p class="text-sm text-muted-foreground leading-relaxed">
-              Choisis une catégorie dans la barre de gauche, puis une source pour lire les dernières actualités.
-            </p>
+        <!-- Accueil / état vide -->
+        <div v-if="!selectedFeed && !articlesLoading && !articlesError" class="h-full flex items-center justify-center p-8 bg-radar">
+          <div class="text-center space-y-5 max-w-sm">
+            <div class="relative mx-auto size-20 grid place-items-center radar-sweep rounded-full border border-primary/25 bg-primary/5">
+              <Radar class="size-7 text-primary text-glow" />
+            </div>
+            <div class="space-y-2">
+              <h2 class="font-mono text-lg font-semibold tracking-[0.15em] text-foreground">TRANSPONDER</h2>
+              <p class="text-sm text-muted-foreground leading-relaxed">
+                Console de veille RSS. Choisis une <span class="text-foreground">fréquence</span>, accroche une <span class="text-foreground">station</span>, et intercepte ses transmissions.
+              </p>
+            </div>
+            <div class="flex items-center justify-center gap-4 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70 pt-2">
+              <span>{{ categories.length }} fréquences</span>
+              <span class="size-1 rounded-full bg-border" />
+              <span>{{ totalFeeds }} stations</span>
+            </div>
           </div>
         </div>
 
-        <!-- Skeleton de chargement -->
-        <div v-else-if="articlesLoading" class="max-w-2xl mx-auto py-6 px-4 space-y-5">
-          <div v-for="n in 6" :key="n" class="space-y-2 border-b pb-5">
-            <Skeleton class="h-5 w-4/5" />
-            <Skeleton class="h-4 w-full" />
-            <Skeleton class="h-4 w-2/3" />
-            <Skeleton class="h-3 w-28 mt-2" />
+        <!-- Chargement -->
+        <div v-else-if="articlesLoading" class="max-w-2xl mx-auto py-2">
+          <div class="px-5 py-3 border-b border-border/60 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            <span class="size-1.5 rounded-full bg-primary animate-pulse" />
+            Acquisition du signal…
+          </div>
+          <div v-for="n in 7" :key="n" class="flex gap-3.5 px-5 py-4 border-b border-border/40">
+            <Skeleton class="h-3 w-5 shrink-0" />
+            <div class="flex-1 space-y-2">
+              <Skeleton class="h-4 w-4/5" />
+              <Skeleton class="h-3 w-full" />
+              <Skeleton class="h-3 w-2/3" />
+              <Skeleton class="h-2.5 w-28 mt-2" />
+            </div>
           </div>
         </div>
 
         <!-- Erreur -->
-        <div v-else-if="articlesError" class="h-full flex items-center justify-center p-8">
-          <div class="text-center space-y-3">
-            <p class="text-3xl">⚠️</p>
-            <p class="text-sm text-muted-foreground max-w-xs leading-relaxed">{{ articlesError }}</p>
-            <Button variant="outline" size="sm" @click="selectFeed(selectedFeed!)">
-              Réessayer
+        <div v-else-if="articlesError" class="h-full flex items-center justify-center p-8 bg-grid">
+          <div class="text-center space-y-4 max-w-xs">
+            <span class="grid place-items-center size-14 mx-auto rounded-full border border-destructive/40 bg-destructive/10">
+              <Radio class="size-6 text-destructive" />
+            </span>
+            <div class="space-y-1.5">
+              <p class="font-mono text-xs font-semibold uppercase tracking-widest text-destructive">No signal</p>
+              <p class="text-sm text-muted-foreground leading-relaxed">{{ articlesError }}</p>
+            </div>
+            <Button variant="outline" size="sm" class="gap-1.5 font-mono text-xs uppercase tracking-wider" @click="selectFeed(selectedFeed!)">
+              <RefreshCw class="size-3.5" /> Réessayer
             </Button>
           </div>
         </div>
 
-        <!-- Liste d'articles -->
+        <!-- Liste des transmissions -->
         <div v-else-if="articles.length">
-          <div class="px-4 py-3 border-b sticky top-0 bg-background/95 backdrop-blur-sm z-10">
-            <p class="font-semibold text-sm">{{ selectedFeed?.name }}</p>
-            <p class="text-xs text-muted-foreground">{{ articles.length }} articles</p>
+          <div class="px-5 py-3 border-b border-border/80 sticky top-0 bg-background/90 backdrop-blur-md z-10 flex items-center gap-3">
+            <span class="size-1.5 rounded-full bg-signal signal-dot shrink-0" />
+            <div class="min-w-0">
+              <p class="font-semibold text-sm truncate leading-tight">{{ selectedFeed?.name }}</p>
+              <p class="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mt-0.5">
+                {{ articles.length }} transmissions interceptées
+              </p>
+            </div>
+            <Button v-if="selectedFeed" variant="ghost" size="icon-sm" class="ml-auto size-7 text-muted-foreground hover:text-primary" title="Rafraîchir" @click="selectFeed(selectedFeed)">
+              <RefreshCw class="size-3.5" />
+            </Button>
           </div>
           <ReaderArticleCard
-            v-for="article in articles"
+            v-for="(article, i) in articles"
             :key="article.link"
             :article="article"
+            :index="i"
             @summarize="openSummary"
           />
         </div>
@@ -251,12 +403,10 @@ async function signOut() {
       </main>
     </div>
 
-    <!-- ─── Mobile Sheet ──────────────────────────────────────── -->
+    <!-- ─── Sheet mobile ──────────────────────────────────────── -->
     <Sheet v-model:open="drawerOpen">
-      <SheetContent side="left" class="w-80 p-0 flex flex-col gap-0">
-
-        <!-- Sheet header -->
-        <div class="h-12 border-b flex items-center px-3 gap-2 shrink-0">
+      <SheetContent side="left" class="w-80 p-0 flex flex-col gap-0 bg-sidebar">
+        <div class="h-14 border-b border-border/80 flex items-center px-3 gap-2 shrink-0">
           <Button
             v-if="mobileView === 'feeds'"
             variant="ghost"
@@ -266,111 +416,114 @@ async function signOut() {
           >
             <ChevronLeft class="size-4" />
           </Button>
-          <span class="text-sm font-medium flex-1">
-            {{ mobileView === 'feeds' ? selectedCategory?.name : 'Catégories' }}
-          </span>
+          <SheetTitle class="font-mono text-xs uppercase tracking-widest flex-1">
+            {{ mobileView === 'feeds' ? selectedCategory?.name : 'Fréquences' }}
+          </SheetTitle>
         </div>
 
-        <!-- Vue catégories -->
         <div v-if="mobileView === 'categories'" class="flex-1 overflow-y-auto py-2">
           <template v-if="bookmarkedCategories.length">
-            <p class="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Favoris</p>
-            <div
+            <p class="px-4 py-1.5 font-mono text-[10px] font-semibold text-primary/80 uppercase tracking-widest">Monitoring</p>
+            <ReaderCategoryRow
               v-for="cat in bookmarkedCategories"
               :key="cat.id"
-              class="flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent"
-              @click="selectCategory(cat)"
-            >
-              <Star class="size-3 shrink-0 fill-amber-400 text-amber-400" />
-              <span class="text-sm">{{ cat.name }}</span>
-            </div>
-            <Separator class="my-2" />
+              :category="cat"
+              :selected="selectedCategory?.id === cat.id"
+              :bookmarked="true"
+              @select="selectCategory(cat)"
+              @toggle-bookmark="toggleBookmark(cat.id)"
+            />
+            <Separator class="my-2 opacity-60" />
           </template>
-          <p class="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Toutes</p>
-          <div
+          <p class="px-4 py-1.5 font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Toutes bandes</p>
+          <ReaderCategoryRow
             v-for="cat in otherCategories"
             :key="cat.id"
-            class="px-3 py-2.5 text-sm cursor-pointer hover:bg-accent"
-            @click="selectCategory(cat)"
-          >
-            {{ cat.name }}
-          </div>
+            :category="cat"
+            :selected="selectedCategory?.id === cat.id"
+            :bookmarked="false"
+            @select="selectCategory(cat)"
+            @toggle-bookmark="toggleBookmark(cat.id)"
+          />
         </div>
 
-        <!-- Vue sources -->
-        <div v-else class="flex-1 overflow-y-auto">
-          <div
+        <div v-else class="flex-1 overflow-y-auto py-1">
+          <button
             v-for="feed in selectedCategory?.feeds"
             :key="feed.id"
-            class="px-3 py-3 cursor-pointer hover:bg-accent border-b border-border/50"
+            class="w-full text-left px-4 py-3 cursor-pointer hover:bg-accent/40 border-b border-border/40"
             @click="selectFeed(feed)"
           >
-            <p class="text-sm font-medium">{{ feed.name }}</p>
-            <p class="text-xs text-muted-foreground mt-0.5">{{ feed.description }}</p>
-          </div>
+            <div class="flex items-center gap-2">
+              <span class="size-1.5 rounded-full shrink-0" :class="feed.telex ? 'bg-signal signal-dot' : 'bg-muted-foreground/40'" />
+              <span class="text-sm font-medium flex-1">{{ feed.name }}</span>
+              <span v-if="feed.telex" class="font-mono text-[8px] font-bold uppercase tracking-widest text-signal">LIVE</span>
+            </div>
+            <p v-if="feed.description" class="text-xs text-muted-foreground mt-0.5 pl-3.5">{{ feed.description }}</p>
+          </button>
         </div>
-
       </SheetContent>
     </Sheet>
 
   </div>
 
-  <!-- ─── Sheet résumé IA ──────────────────────────────────── -->
+  <!-- ─── Sheet briefing IA ─────────────────────────────────── -->
   <Sheet v-model:open="summaryOpen">
-    <SheetContent side="right" class="w-full sm:max-w-md flex flex-col gap-0 p-0">
+    <SheetContent side="right" class="w-full sm:max-w-md flex flex-col gap-0 p-0 bg-card">
 
-      <div class="px-5 py-4 border-b shrink-0">
-        <div class="flex items-center gap-2 mb-1">
+      <div class="px-5 py-4 border-b border-border/80 shrink-0 bg-sidebar/50">
+        <div class="flex items-center gap-2 mb-2">
           <Sparkles class="size-4 text-primary" />
-          <SheetTitle class="text-sm font-semibold">Résumé IA</SheetTitle>
-          <Badge v-if="summaryCached" variant="secondary" class="text-xs ml-auto">Mis en cache</Badge>
+          <SheetTitle class="font-mono text-xs font-semibold uppercase tracking-widest">Briefing IA</SheetTitle>
+          <Badge v-if="summaryCached" variant="outline" class="ml-auto font-mono text-[9px] uppercase tracking-wider border-signal/40 text-signal">
+            Cache
+          </Badge>
         </div>
-        <p class="text-xs text-muted-foreground line-clamp-2">{{ summaryArticle?.title }}</p>
+        <p class="text-sm font-medium leading-snug line-clamp-2">{{ summaryArticle?.title }}</p>
       </div>
 
-      <div class="flex-1 overflow-y-auto px-5 py-5">
+      <div class="flex-1 overflow-y-auto px-5 py-5 bg-grid">
 
-        <!-- Loading -->
+        <!-- Chargement -->
         <div v-if="summaryLoading" class="space-y-3">
-          <div class="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-            <div class="size-3 rounded-full bg-primary animate-pulse" />
-            Génération en cours…
+          <div class="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-5">
+            <span class="size-2 rounded-full bg-primary animate-pulse" />
+            Décodage en cours…
           </div>
           <Skeleton class="h-4 w-full" />
           <Skeleton class="h-4 w-5/6" />
           <Skeleton class="h-4 w-4/5" />
-          <Skeleton class="h-4 w-full mt-4" />
+          <Skeleton class="h-12 w-full mt-5 rounded-md" />
         </div>
 
         <!-- Erreur -->
-        <div v-else-if="summaryError" class="text-sm text-destructive space-y-3">
-          <p>{{ summaryError }}</p>
-          <Button variant="outline" size="sm" @click="openSummary(summaryArticle!)">
-            Réessayer
+        <div v-else-if="summaryError" class="space-y-3">
+          <p class="font-mono text-[10px] uppercase tracking-widest text-destructive">Échec du décodage</p>
+          <p class="text-sm text-muted-foreground leading-relaxed">{{ summaryError }}</p>
+          <Button variant="outline" size="sm" class="gap-1.5 font-mono text-xs uppercase tracking-wider" @click="openSummary(summaryArticle!)">
+            <RefreshCw class="size-3.5" /> Réessayer
           </Button>
         </div>
 
-        <!-- Résumé formaté -->
-        <div v-else-if="summaryText" class="space-y-3 text-sm leading-relaxed">
+        <!-- Résumé -->
+        <div v-else-if="summaryText" class="space-y-3.5 text-sm leading-relaxed">
           <template v-for="(line, i) in summaryText.split('\n').filter(l => l.trim())" :key="i">
-            <!-- Bullet points -->
-            <div v-if="line.startsWith('•')" class="flex gap-2">
-              <span class="text-primary font-bold shrink-0 mt-0.5">•</span>
-              <span>{{ line.slice(1).trim() }}</span>
+            <div v-if="line.startsWith('•')" class="flex gap-2.5">
+              <span class="mt-2 size-1.5 shrink-0 rounded-full bg-primary" />
+              <span class="text-foreground/90">{{ line.slice(1).trim() }}</span>
             </div>
-            <!-- Conclusion 💡 -->
-            <div v-else-if="line.startsWith('💡')" class="mt-4 rounded-md bg-muted px-3 py-2.5 text-muted-foreground text-xs">
-              {{ line }}
+            <div v-else-if="line.startsWith('💡')" class="mt-4 rounded-md border border-primary/25 bg-primary/5 px-3.5 py-3">
+              <p class="font-mono text-[9px] uppercase tracking-widest text-primary mb-1.5">Pourquoi ça compte</p>
+              <p class="text-[13px] text-foreground/90">{{ line.replace('💡', '').trim() }}</p>
             </div>
           </template>
         </div>
-
       </div>
 
-      <div class="px-5 py-3 border-t shrink-0">
-        <Button variant="outline" size="sm" class="w-full" as-child>
+      <div class="px-5 py-3.5 border-t border-border/80 shrink-0 bg-sidebar/50">
+        <Button variant="outline" size="sm" class="w-full gap-1.5 font-mono text-xs uppercase tracking-wider" as-child>
           <a :href="summaryArticle?.link" target="_blank" rel="noopener noreferrer">
-            Lire l'article complet
+            Lire la source <ArrowUpRight class="size-3.5" />
           </a>
         </Button>
       </div>
