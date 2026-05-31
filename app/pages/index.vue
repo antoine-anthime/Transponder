@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import {
   Star, Menu, ChevronLeft, Sparkles, Radar, Radio,
-  Sun, Moon, LogOut, ArrowUpRight, RefreshCw, Signal,
+  Sun, Moon, LogOut, ArrowUpRight, RefreshCw, Signal, CheckCheck, ArrowUp,
+  Plus, Trash2, Rss, Newspaper,
 } from '@lucide/vue'
 import type { Category, Feed, Article } from '~/types'
 
@@ -10,7 +11,53 @@ const user = useSupabaseUser()
 
 const { categories, fetchCategories } = useCategories()
 const { isBookmarked, fetchBookmarks, toggleBookmark } = useBookmarks()
+const { isRead, markRead, markAllRead, fetchReadArticles } = useReadArticles()
+const { userFeeds, fetchUserFeeds, addUserFeed: _addUserFeed, removeUserFeed } = useUserFeeds()
 const { color: categoryColor, icon: categoryIcon } = useCategoryMeta()
+
+// ── Sources personnalisées ───────────────────────────────
+const addFeedOpen = ref(false)
+
+// ── Digest de flux ───────────────────────────────────────
+const digestOpen = ref(false)
+
+const personalCategory = computed<Category | null>(() => {
+  if (!userFeeds.value.length) return null
+  return {
+    id: -1,
+    name: 'Mes sources',
+    slug: 'personal',
+    description: null,
+    feeds: userFeeds.value.map(f => ({
+      id: f.id,
+      category_id: -1,
+      name: f.name,
+      url: f.url,
+      description: f.description,
+      telex: false,
+    })),
+  }
+})
+
+// Keep selectedCategory in sync when user feeds change (e.g. after delete)
+watch(userFeeds, () => {
+  if (selectedCategory.value?.id !== -1) return
+  if (personalCategory.value) {
+    selectedCategory.value = personalCategory.value
+  } else {
+    selectedCategory.value = null
+  }
+})
+
+async function handleRemoveUserFeed(feedId: number) {
+  if (selectedFeed.value?.id === feedId) {
+    selectedFeed.value = null
+    articles.value = []
+    pendingArticles.value = []
+    stopPolling()
+  }
+  await removeUserFeed(feedId)
+}
 
 // Reader state
 const selectedCategory = ref<Category | null>(null)
@@ -18,6 +65,12 @@ const selectedFeed = ref<Feed | null>(null)
 const articles = ref<Article[]>([])
 const articlesLoading = ref(false)
 const articlesError = ref<string | null>(null)
+
+// ── Polling ──────────────────────────────────────────────
+const POLL_INTERVAL = 10 * 60 * 1000
+const pendingArticles = ref<Article[]>([])
+let pollingTimer: ReturnType<typeof setInterval> | undefined
+let visibilityHandler: (() => void) | undefined
 
 // Mobile drawer
 const drawerOpen = ref(false)
@@ -39,9 +92,16 @@ const totalFeeds = computed(() =>
 const selectedAccent = computed(() =>
   selectedCategory.value ? categoryColor(selectedCategory.value.id) : 'var(--primary)',
 )
+const unreadCount = computed(() =>
+  articles.value.filter(a => !isRead(a.link)).length,
+)
+
+function handleMarkRead(article: Article) {
+  markRead(article.link)
+}
 
 onMounted(async () => {
-  await Promise.all([fetchCategories(), fetchBookmarks()])
+  await Promise.all([fetchCategories(), fetchBookmarks(), fetchReadArticles(), fetchUserFeeds()])
 })
 
 function selectCategory(cat: Category) {
@@ -49,6 +109,8 @@ function selectCategory(cat: Category) {
   selectedFeed.value = null
   articles.value = []
   articlesError.value = null
+  pendingArticles.value = []
+  stopPolling()
   mobileView.value = 'feeds'
 }
 
@@ -58,15 +120,54 @@ async function selectFeed(feed: Feed) {
   articlesLoading.value = true
   articlesError.value = null
   articles.value = []
+  pendingArticles.value = []
+  stopPolling()
 
   try {
     const data = await $fetch<Article[]>('/api/news', { query: { url: feed.url } })
     articles.value = data
+    startPolling()
   } catch {
     articlesError.value = 'Aucun signal. Le flux est peut-être indisponible ou son format n\'est pas supporté.'
   } finally {
     articlesLoading.value = false
   }
+}
+
+async function silentFetch() {
+  if (!selectedFeed.value) return
+  try {
+    const data = await $fetch<Article[]>('/api/news', { query: { url: selectedFeed.value.url } })
+    const currentLinks = new Set(articles.value.map(a => a.link))
+    const fresh = data.filter(a => !currentLinks.has(a.link))
+    if (fresh.length > 0) pendingArticles.value = fresh
+  } catch {
+    // silent — ne pas perturber l'UI
+  }
+}
+
+function startPolling() {
+  stopPolling()
+  pollingTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') silentFetch()
+  }, POLL_INTERVAL)
+  visibilityHandler = () => {
+    if (document.visibilityState === 'visible') silentFetch()
+  }
+  document.addEventListener('visibilitychange', visibilityHandler)
+}
+
+function stopPolling() {
+  clearInterval(pollingTimer)
+  if (visibilityHandler) {
+    document.removeEventListener('visibilitychange', visibilityHandler)
+    visibilityHandler = undefined
+  }
+}
+
+function applyNewArticles() {
+  articles.value = [...pendingArticles.value, ...articles.value]
+  pendingArticles.value = []
 }
 
 function openDrawer() {
@@ -101,7 +202,10 @@ onMounted(() => {
   tickClock()
   clockTimer = setInterval(tickClock, 1000)
 })
-onUnmounted(() => clearInterval(clockTimer))
+onUnmounted(() => {
+  clearInterval(clockTimer)
+  stopPolling()
+})
 
 // ── Briefing IA ─────────────────────────────────────────
 const summaryOpen = ref(false)
@@ -118,6 +222,7 @@ async function openSummary(article: Article) {
   summaryCached.value = false
   summaryLoading.value = true
   summaryOpen.value = true
+  markRead(article.link)
 
   try {
     const res = await $fetch<{ summary: string, cached: boolean }>('/api/summarize', {
@@ -229,6 +334,49 @@ async function signOut() {
         </div>
 
         <div class="flex-1 overflow-y-auto pb-3">
+
+          <!-- Mes sources (custom user feeds) -->
+          <template v-if="personalCategory">
+            <div class="flex items-center justify-between px-4 py-1.5">
+              <p class="font-mono text-[10px] font-semibold text-amber-400/90 uppercase tracking-widest flex items-center gap-1.5">
+                <Rss class="size-3" /> Mes sources
+              </p>
+              <button
+                class="grid place-items-center size-5 rounded hover:bg-foreground/10 text-muted-foreground hover:text-primary transition-colors"
+                title="Ajouter une source"
+                @click="addFeedOpen = true"
+              >
+                <Plus class="size-3" />
+              </button>
+            </div>
+            <div
+              class="group relative flex items-center gap-2.5 mx-1.5 px-2.5 py-2 rounded-md cursor-pointer transition-all duration-150"
+              :class="selectedCategory?.id === -1 ? 'bg-accent/70' : 'hover:bg-accent/40'"
+              @click="selectCategory(personalCategory)"
+            >
+              <span
+                class="flex size-6 shrink-0 items-center justify-center rounded-[5px] border transition-colors"
+                :style="{
+                  color: 'oklch(0.81 0.13 75)',
+                  borderColor: selectedCategory?.id === -1 ? 'oklch(0.81 0.13 75)' : 'var(--border)',
+                  background: selectedCategory?.id === -1 ? 'color-mix(in oklab, oklch(0.81 0.13 75) 14%, transparent)' : 'transparent',
+                }"
+              >
+                <Rss class="size-3.5" />
+              </span>
+              <span
+                class="flex-1 text-sm truncate transition-colors"
+                :class="selectedCategory?.id === -1 ? 'font-medium text-foreground' : 'text-foreground/80 group-hover:text-foreground'"
+              >
+                Mes sources
+              </span>
+              <span class="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+                {{ personalCategory.feeds.length.toString().padStart(2, '0') }}
+              </span>
+            </div>
+            <Separator class="my-2.5 opacity-60" />
+          </template>
+
           <template v-if="bookmarkedCategories.length">
             <p class="flex items-center gap-1.5 px-4 py-1.5 font-mono text-[10px] font-semibold text-primary/80 uppercase tracking-widest">
               <Star class="size-3 fill-primary text-primary" /> Monitoring
@@ -257,6 +405,17 @@ async function signOut() {
             @select="selectCategory(cat)"
             @toggle-bookmark="toggleBookmark(cat.id)"
           />
+        </div>
+
+        <!-- Footer: add source button (always visible) -->
+        <div class="px-3 py-2.5 border-t border-border/60 shrink-0">
+          <button
+            class="w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-muted-foreground hover:text-primary hover:bg-accent/40 transition-colors font-mono text-[11px] uppercase tracking-wider"
+            @click="addFeedOpen = true"
+          >
+            <Plus class="size-3.5 shrink-0" />
+            Ajouter une source
+          </button>
         </div>
       </aside>
 
@@ -305,8 +464,27 @@ async function signOut() {
                   {{ feed.name }}
                 </span>
                 <span v-if="feed.telex" class="font-mono text-[8px] font-bold uppercase tracking-widest text-signal">LIVE</span>
+                <!-- Delete button for personal feeds -->
+                <button
+                  v-if="selectedCategory.id === -1"
+                  class="opacity-0 group-hover:opacity-100 grid place-items-center size-5 rounded hover:bg-destructive/15 text-muted-foreground/60 hover:text-destructive transition-all"
+                  title="Supprimer cette source"
+                  @click.stop="handleRemoveUserFeed(feed.id)"
+                >
+                  <Trash2 class="size-3" />
+                </button>
               </div>
               <p v-if="feed.description" class="text-xs text-muted-foreground truncate mt-0.5 pl-3.5">{{ feed.description }}</p>
+            </button>
+
+            <!-- Add more button for personal feeds -->
+            <button
+              v-if="selectedCategory.id === -1"
+              class="w-full flex items-center gap-2 px-4 py-2.5 text-muted-foreground hover:text-primary hover:bg-accent/30 transition-colors font-mono text-[11px] uppercase tracking-wider"
+              @click="addFeedOpen = true"
+            >
+              <Plus class="size-3.5 shrink-0" />
+              Ajouter une source
             </button>
           </div>
         </template>
@@ -384,19 +562,65 @@ async function signOut() {
             <div class="min-w-0">
               <p class="font-semibold text-sm truncate leading-tight">{{ selectedFeed?.name }}</p>
               <p class="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mt-0.5">
-                {{ articles.length }} transmissions interceptées
+                <span v-if="unreadCount > 0" class="text-primary">{{ unreadCount }} non lu{{ unreadCount > 1 ? 's' : '' }}</span>
+                <span v-else>Tout lu</span>
+                <span class="text-muted-foreground/50 mx-1">·</span>
+                {{ articles.length }} transmissions
               </p>
             </div>
-            <Button v-if="selectedFeed" variant="ghost" size="icon-sm" class="ml-auto size-7 text-muted-foreground hover:text-primary" title="Rafraîchir" @click="selectFeed(selectedFeed)">
-              <RefreshCw class="size-3.5" />
-            </Button>
+            <div class="ml-auto flex items-center gap-1">
+              <Button
+                v-if="unreadCount > 0"
+                variant="ghost"
+                size="icon-sm"
+                class="size-7 text-muted-foreground hover:text-primary"
+                title="Tout marquer comme lu"
+                @click="markAllRead(articles.map(a => a.link))"
+              >
+                <CheckCheck class="size-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                class="size-7 text-muted-foreground hover:text-primary"
+                title="Digest IA — résumer ce flux"
+                @click="digestOpen = true"
+              >
+                <Newspaper class="size-3.5" />
+              </Button>
+              <Button v-if="selectedFeed" variant="ghost" size="icon-sm" class="size-7 text-muted-foreground hover:text-primary" title="Rafraîchir" @click="selectFeed(selectedFeed)">
+                <RefreshCw class="size-3.5" />
+              </Button>
+            </div>
           </div>
+          <Transition
+            enter-active-class="transition-all duration-300 ease-out overflow-hidden"
+            enter-from-class="max-h-0 opacity-0"
+            enter-to-class="max-h-16 opacity-100"
+            leave-active-class="transition-all duration-200 ease-in overflow-hidden"
+            leave-from-class="max-h-16 opacity-100"
+            leave-to-class="max-h-0 opacity-0"
+          >
+            <button
+              v-if="pendingArticles.length"
+              class="w-full px-5 py-2.5 flex items-center gap-2.5 bg-primary/8 border-b border-primary/25 font-mono text-[11px] uppercase tracking-widest text-primary hover:bg-primary/15 transition-colors cursor-pointer"
+              @click="applyNewArticles"
+            >
+              <span class="size-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+              <ArrowUp class="size-3 shrink-0" />
+              {{ pendingArticles.length }} nouvelle{{ pendingArticles.length > 1 ? 's' : '' }} transmission{{ pendingArticles.length > 1 ? 's' : '' }}
+              <span class="ml-auto text-primary/60">Charger</span>
+            </button>
+          </Transition>
+
           <ReaderArticleCard
             v-for="(article, i) in articles"
             :key="article.link"
             :article="article"
             :index="i"
+            :read="isRead(article.link)"
             @summarize="openSummary"
+            @mark-read="handleMarkRead"
           />
         </div>
 
@@ -466,6 +690,17 @@ async function signOut() {
     </Sheet>
 
   </div>
+
+  <!-- ─── Sheet ajout de source ───────────────────────────────── -->
+  <ReaderAddFeedSheet v-model:open="addFeedOpen" @added="fetchUserFeeds" />
+
+  <!-- ─── Sheet digest de flux ─────────────────────────────────── -->
+  <ReaderDigestSheet
+    v-model:open="digestOpen"
+    :articles="articles"
+    :feed-name="selectedFeed?.name ?? ''"
+    :feed-url="selectedFeed?.url ?? ''"
+  />
 
   <!-- ─── Sheet briefing IA ─────────────────────────────────── -->
   <Sheet v-model:open="summaryOpen">

@@ -23,3 +23,10 @@ export interface Article {
   pubDate: string
   creator: string
 }
+
+export interface UserFeed {
+  id: number
+  name: string
+  url: string
+  description: string | null
+}
