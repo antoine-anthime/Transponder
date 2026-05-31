@@ -37,7 +37,7 @@ export default defineNuxtConfig({
     redirectOptions: {
       login: '/login',
       callback: '/auth/confirm',
-      exclude: ['/login'],
+      exclude: ['/login', '/auth/reset-password'],
     },
   },
   shadcn: {
