@@ -113,7 +113,7 @@ function handleOpen() {
             {{ relative(article.pubDate) }}
           </span>
 
-          <div class="ml-auto flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <div class="ml-auto flex gap-0.5 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity">
             <Button
               variant="ghost"
               size="icon-sm"

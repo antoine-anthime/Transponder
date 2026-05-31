@@ -43,17 +43,18 @@ const feedCount = computed(() => props.category.feeds?.length ?? 0)
       {{ category.name }}
     </span>
 
+    <!-- Feed count — fades on desktop hover, always visible mobile -->
     <span
-      v-if="feedCount"
-      class="font-mono text-[10px] tabular-nums text-muted-foreground/70 transition-opacity"
-      :class="bookmarked ? 'opacity-0' : 'group-hover:opacity-0'"
+      v-if="feedCount && !bookmarked"
+      class="font-mono text-[10px] tabular-nums text-muted-foreground/70 md:group-hover:opacity-0 transition-opacity"
     >
       {{ feedCount.toString().padStart(2, '0') }}
     </span>
 
+    <!-- Bookmark button -->
     <button
-      class="absolute right-2 shrink-0 grid place-items-center size-5 rounded transition-all hover:bg-foreground/10"
-      :class="bookmarked ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
+      class="absolute right-2 grid place-items-center size-5 rounded transition-all hover:bg-foreground/10"
+      :class="bookmarked ? 'opacity-100' : 'md:opacity-0 md:group-hover:opacity-100'"
       :title="bookmarked ? 'Retirer du monitoring' : 'Monitorer cette fréquence'"
       @click.stop="$emit('toggleBookmark')"
     >

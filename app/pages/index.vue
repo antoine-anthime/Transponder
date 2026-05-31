@@ -2,9 +2,10 @@
 import {
   Star, Menu, ChevronLeft, Sparkles, Radar, Radio,
   Sun, Moon, LogOut, ArrowUpRight, RefreshCw, Signal, CheckCheck, ArrowUp,
-  Plus, Trash2, Rss, Newspaper,
+  Plus, Trash2, Rss, Newspaper, LayoutGrid,
 } from '@lucide/vue'
 import type { Category, Feed, Article } from '~/types'
+import type { DashboardArticle } from '~/composables/useDashboard'
 
 const supabase = useSupabaseClient()
 const user = useSupabaseUser()
@@ -14,6 +15,8 @@ const { isBookmarked, fetchBookmarks, toggleBookmark } = useBookmarks()
 const { isRead, markRead, markAllRead, fetchReadArticles } = useReadArticles()
 const { userFeeds, fetchUserFeeds, addUserFeed: _addUserFeed, removeUserFeed } = useUserFeeds()
 const { color: categoryColor, icon: categoryIcon } = useCategoryMeta()
+const { dashboardFeedIds, isDashboardFeed, fetchDashboardFeeds, toggleDashboardFeed, maxPinned } = useDashboardFeeds()
+const { dashboardSections, dashboardLoading, fetchDashboard } = useDashboard()
 
 // ── Sources personnalisées ───────────────────────────────
 const addFeedOpen = ref(false)
@@ -100,9 +103,24 @@ function handleMarkRead(article: Article) {
   markRead(article.link)
 }
 
-onMounted(async () => {
-  await Promise.all([fetchCategories(), fetchBookmarks(), fetchReadArticles(), fetchUserFeeds()])
+// Re-fetch dashboard when pinned feeds change and no feed is selected
+watch(dashboardFeedIds, () => {
+  if (!selectedFeed.value) fetchDashboard(dashboardFeedIds.value, categories.value)
 })
+
+// Re-fetch dashboard when user navigates back to home screen
+watch(selectedFeed, (feed) => {
+  if (!feed) fetchDashboard(dashboardFeedIds.value, categories.value)
+})
+
+// Load user-specific data once the auth session is fully resolved (id available).
+// user.value can be a partial object without id during SSR hydration.
+watch(user, async (newUser, oldUser) => {
+  if (!newUser?.sub || oldUser?.sub) return // only on first sign-in with a valid sub (JWT claims)
+  // fetchCategories is public but must complete before fetchDashboard builds the feed→category map
+  await Promise.all([fetchCategories(), fetchBookmarks(), fetchDashboardFeeds(), fetchReadArticles(), fetchUserFeeds()])
+  fetchDashboard(dashboardFeedIds.value, categories.value)
+}, { immediate: true })
 
 function selectCategory(cat: Category) {
   selectedCategory.value = cat
@@ -464,15 +482,31 @@ async function signOut() {
                   {{ feed.name }}
                 </span>
                 <span v-if="feed.telex" class="font-mono text-[8px] font-bold uppercase tracking-widest text-signal">LIVE</span>
-                <!-- Delete button for personal feeds -->
-                <button
-                  v-if="selectedCategory.id === -1"
-                  class="opacity-0 group-hover:opacity-100 grid place-items-center size-5 rounded hover:bg-destructive/15 text-muted-foreground/60 hover:text-destructive transition-all"
-                  title="Supprimer cette source"
-                  @click.stop="handleRemoveUserFeed(feed.id)"
-                >
-                  <Trash2 class="size-3" />
-                </button>
+
+                <!-- Action buttons (always visible on mobile, hover-only on desktop) -->
+                <div class="flex gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                  <!-- Pin to dashboard -->
+                  <button
+                    class="grid place-items-center size-5 rounded transition-all hover:bg-amber-400/15"
+                    :class="{ 'opacity-40 cursor-not-allowed': !isDashboardFeed(feed.id) && dashboardFeedIds.length >= maxPinned }"
+                    :title="isDashboardFeed(feed.id) ? 'Retirer du dashboard' : dashboardFeedIds.length >= maxPinned ? `Dashboard complet (${maxPinned} max)` : 'Épingler au dashboard'"
+                    @click.stop="toggleDashboardFeed(feed)"
+                  >
+                    <LayoutGrid
+                      class="size-3 transition-colors"
+                      :class="isDashboardFeed(feed.id) ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground'"
+                    />
+                  </button>
+                  <!-- Delete (personal feeds only) -->
+                  <button
+                    v-if="selectedCategory.id === -1"
+                    class="grid place-items-center size-5 rounded hover:bg-destructive/15 text-muted-foreground/60 hover:text-destructive transition-all"
+                    title="Supprimer cette source"
+                    @click.stop="handleRemoveUserFeed(feed.id)"
+                  >
+                    <Trash2 class="size-3" />
+                  </button>
+                </div>
               </div>
               <p v-if="feed.description" class="text-xs text-muted-foreground truncate mt-0.5 pl-3.5">{{ feed.description }}</p>
             </button>
@@ -502,8 +536,19 @@ async function signOut() {
       <!-- Col 3 : Transmissions -->
       <main class="flex-1 overflow-y-auto bg-background">
 
+        <!-- Dashboard (feeds épinglés) -->
+        <ReaderDashboardView
+          v-if="!selectedFeed && dashboardFeedIds.length"
+          :sections="dashboardSections"
+          :loading="dashboardLoading"
+          :pinned-count="dashboardFeedIds.length"
+          :max-pinned="maxPinned"
+          @summarize="(a: DashboardArticle) => openSummary(a)"
+          @mark-read="(link: string) => markRead(link)"
+        />
+
         <!-- Accueil / état vide -->
-        <div v-if="!selectedFeed && !articlesLoading && !articlesError" class="h-full flex items-center justify-center p-8 bg-radar">
+        <div v-else-if="!selectedFeed && !articlesLoading && !articlesError" class="h-full flex items-center justify-center p-8 bg-radar">
           <div class="text-center space-y-5 max-w-sm">
             <div class="relative mx-auto size-20 grid place-items-center radar-sweep rounded-full border border-primary/25 bg-primary/5">
               <Radar class="size-7 text-primary text-glow" />
