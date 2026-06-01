@@ -484,7 +484,7 @@ async function signOut() {
                 <span v-if="feed.telex" class="font-mono text-[8px] font-bold uppercase tracking-widest text-signal">LIVE</span>
 
                 <!-- Action buttons (always visible on mobile, hover-only on desktop) -->
-                <div class="flex gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                <div class="flex gap-0.5 transition-opacity md:opacity-0 md:group-hover:opacity-100">
                   <!-- Pin to dashboard -->
                   <button
                     class="grid place-items-center size-5 rounded transition-all hover:bg-amber-400/15"
@@ -720,13 +720,25 @@ async function signOut() {
           <button
             v-for="feed in selectedCategory?.feeds"
             :key="feed.id"
-            class="w-full text-left px-4 py-3 cursor-pointer hover:bg-accent/40 border-b border-border/40"
+            class="group w-full text-left px-4 py-3 cursor-pointer hover:bg-accent/40 border-b border-border/40"
             @click="selectFeed(feed)"
           >
             <div class="flex items-center gap-2">
               <span class="size-1.5 rounded-full shrink-0" :class="feed.telex ? 'bg-signal signal-dot' : 'bg-muted-foreground/40'" />
               <span class="text-sm font-medium flex-1">{{ feed.name }}</span>
               <span v-if="feed.telex" class="font-mono text-[8px] font-bold uppercase tracking-widest text-signal">LIVE</span>
+              <!-- Pin to dashboard — always visible on mobile -->
+              <button
+                class="grid place-items-center size-6 rounded transition-all hover:bg-amber-400/15"
+                :class="{ 'opacity-40': !isDashboardFeed(feed.id) && dashboardFeedIds.length >= maxPinned }"
+                :title="isDashboardFeed(feed.id) ? 'Retirer du dashboard' : 'Épingler au dashboard'"
+                @click.stop="toggleDashboardFeed(feed)"
+              >
+                <LayoutGrid
+                  class="size-3.5 transition-colors"
+                  :class="isDashboardFeed(feed.id) ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground/50'"
+                />
+              </button>
             </div>
             <p v-if="feed.description" class="text-xs text-muted-foreground mt-0.5 pl-3.5">{{ feed.description }}</p>
           </button>
