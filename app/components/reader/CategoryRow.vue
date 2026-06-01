@@ -43,10 +43,10 @@ const feedCount = computed(() => props.category.feeds?.length ?? 0)
       {{ category.name }}
     </span>
 
-    <!-- Feed count — fades on desktop hover, always visible mobile -->
+    <!-- Feed count — desktop only, fades on hover -->
     <span
       v-if="feedCount && !bookmarked"
-      class="font-mono text-[10px] tabular-nums text-muted-foreground/70 md:group-hover:opacity-0 transition-opacity"
+      class="hidden md:inline font-mono text-[10px] tabular-nums text-muted-foreground/70 md:group-hover:opacity-0 transition-opacity"
     >
       {{ feedCount.toString().padStart(2, '0') }}
     </span>
